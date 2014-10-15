@@ -644,26 +644,30 @@ def encrypt_privmsg(word, word_eol, userdata):
 
 def key(word, word_eol, userdata):
     ctx = xchat.get_context()
-    target = ctx.get_info('channel')
-    if len(word) >= 2:
-        target = word[1]
-    server = ctx.get_info('server')
-    if len(word) >= 4:
-        if word[2] == '--network':
-            server = word[3]
-    id_ = (target, server)
+
+    target = word[1] if len(word) >= 2 else ctx.get_info('channel')
+    server = word[3] if len(word) >= 4 and word[2] == '--network' else ctx.get_info('server')
+
     try:
-        key = KEY_MAP[id_]
+        key = KEY_MAP[target, server]
     except KeyError:
         key = SecretKey(None)
+
     if len(word) >= 3 and word[2] != '--network':
         key.key = word_eol[2]
-        KEY_MAP[id_] = key
     elif len(word) >= 5 and word[2] == '--network':
         key.key = word_eol[4]
-    KEY_MAP[id_] = key
-    KEY_MAP[id_].hashKey = sha256(key.key)
-    print 'Key for', id_, 'set to', key.key, "( AES =", key.aes, ")"
+    else:
+        if key.key:
+            print 'Key for {} @ {} is {} (AES: {})'.format(target, server, key.key, key.aes)
+        else:
+            print 'No key set for {} @ {}'.format(target, server)
+        return xchat.EAT_ALL
+
+    key.hashKey = sha256(key.key)
+    KEY_MAP[target, server] = key
+
+    print 'Key for {} @ {} set to {} (AES: {})'.format(target, server, key.key, key.aes)
     return xchat.EAT_ALL
 
 
