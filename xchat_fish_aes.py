@@ -1,4 +1,3 @@
-
 __author__ = "saltire sable <x@saltiresable.com>"
 __date__ = "2014-10-15"
 __version__ = "3.0"
@@ -33,11 +32,18 @@ def xorstring(a, b, blocksize): # Slow.
 
 class SecretKey:
 
-    def __init__(self, dh=None, text=None):
+    def __init__(self, dh=None, text=''):
         self.dh = dh
         self.text = text
         self.hash = ''
         self.aes = False
+
+    def set_text(self, text=''):
+        self.text = text
+        self.hash = sha256(text)
+
+    def get_type(self):
+        return 'AES' if self.aes else 'Blowfish'
 
 
 class KeyMap(dict):
@@ -69,31 +75,91 @@ class FiSH_AES:
     def set_key(self, word, word_eol, userdata):
         """Save, or display, a key for a particular target on a particular server.
         Defaults to the current channel on the current server."""
-        ctx = xchat.get_context()
+        target = xchat.get_info('channel')
+        server = xchat.get_info('server')
+        newkey = ''
 
-        target = word[1] if len(word) >= 2 else ctx.get_info('channel')
-        server = word[3] if len(word) >= 4 and word[2] == '--network' else ctx.get_info('server')
+        if len(word) == 2:
+            newkey = word[1]
+        elif len(word) >= 3:
+            if word[1][0] == ':':
+                newkey = word_eol[1][1:]
+            else:
+                target = word[1]
+                if len(word) == 3:
+                    newkey = word[2]
+                else:
+                    if word[2][0] == ':':
+                        newkey = word_eol[2][1:]
+                    else:
+                        server = word[2]
+                        newkey = word_eol[3]
 
         try:
             key = self.keymap[target, server]
         except KeyError:
             key = SecretKey()
+            self.keymap[target, server] = key
 
-        if len(word) >= 3 and word[2] != '--network':
-            key.text = word_eol[2]
-        elif len(word) >= 5 and word[2] == '--network':
-            key.text = word_eol[4]
+        if newkey:
+            key.set_text(newkey)
+            print 'Key for {} @ {} set to "{}" ({}).'.format(target, server, key.text,
+                                                             key.get_type())
+        elif key.text:
+            print 'Key for {} @ {} is "{}" ({}).'.format(target, server, key.text, key.get_type())
         else:
-            if key.text:
-                print 'Key for {} @ {} is "{}" (AES: {})'.format(target, server, key.text, key.aes)
+            print 'No key set for {} @ {}.'.format(target, server)
+
+        return xchat.EAT_ALL
+
+    def set_key_type(self, word, word_eol, userdata):
+        target = xchat.get_info('channel')
+        server = xchat.get_info('server')
+        ktype = ''
+
+        if len(word) == 2:
+            ktype = word[1]
+        elif len(word) >= 3:
+            target = word[1]
+            if len(word) == 3:
+                ktype = word[2]
             else:
-                print 'No key set for {} @ {}'.format(target, server)
-            return xchat.EAT_ALL
+                server = word[2]
+                ktype = word[3]
 
-        key.hash = sha256(key.text)
-        self.keymap[target, server] = key
+        try:
+            key = self.keymap[target, server]
+        except KeyError:
+            print 'No key set for {} @ {}.'.format(target, server)
+        else:
+            if ktype.lower() in ['aes', 'a', 'blowfish', 'b']:
+                key.aes = (ktype.lower() in ['aes', 'a'])
+                print 'Key type for {} @ {} set to {}.'.format(target, server, key.get_type())
+            elif not ktype:
+                print 'Key type for {} @ {} is {}.'.format(target, server, key.get_type())
+            else:
+                print 'Key type must be either AES or Blowfish.'
 
-        print 'Key for {} @ {} set to "{}" (AES: {})'.format(target, server, key.text, key.aes)
+        return xchat.EAT_ALL
+
+    def list_keys(self, word, word_eol, userdata):
+        """List all currently known keys."""
+        n = len(self.keymap)
+        print 'Found {} key{}.'.format(n, '' if n == 1 else 's')
+        for (target, server), key in self.keymap.iteritems():
+            print '  {} @ {}: {} ({})'.format(target, server, key.text, key.get_type())
+        return xchat.EAT_ALL
+
+    def remove_key(self, word, word_eol, userdata):
+        target = word[1] if len(word) >= 2 else xchat.get_info('channel')
+        server = word[2] if len(word) >= 3 else xchat.get_info('server')
+
+        try:
+            del self.keymap[target, server]
+            print 'Key removed for {} @ {}.'.format(target, server)
+        except KeyError:
+            print 'No key found for {} @ {}.'.format(target, server)
+
         return xchat.EAT_ALL
 
     def unload(self, userdata):
@@ -123,7 +189,16 @@ class FiSH_AES:
 fish = FiSH_AES()
 
 xchat.hook_command('key', getattr(fish, 'set_key'),
-                   help='show information or set key, /key <nick> [<--network> <network>] [new_key]')
+                   help=('/KEY [<nick/channel>] [<network>] [new_key],'
+                         'display or set the key for a particular nick or channel.'))
+xchat.hook_command('key_list', getattr(fish, 'list_keys'),
+                   help='/KEY_LIST, list all currently known keys.')
+xchat.hook_command('key_remove', getattr(fish, 'remove_key'),
+                   help='/KEY_REMOVE [<nick/channel>] [<network>], remove a key.')
+xchat.hook_command('key_type', getattr(fish, 'set_key_type'),
+                   help=('/KEY_TYPE [<nick/channel>] [<network>] [AES|Blowfish],'
+                         'display or set the key type for a particular nick or channel.'))
+
 
 xchat.hook_unload(getattr(fish, 'unload'))
 
